@@ -107,6 +107,32 @@ RSpec.describe RuboCop::Rails::SchemaLoader do
             expect(add_indices.first.unique).to be true
           end
         end
+
+        context 'when the schema has foreign keys' do
+          let(:schema) { <<~RUBY }
+            ActiveRecord::Schema.define(version: 2020_02_02_075409) do
+              create_table "users", force: :cascade do |t|
+                t.integer "role_id"
+              end
+              create_table "roles", force: :cascade do |t|
+              end
+
+              add_foreign_key "users", "roles", on_delete: :restrict, column: "role_id", primary_key: "id", name: "users_roles_fk"
+            end
+          RUBY
+
+          it 'loads the foreign_keys' do
+            users_table = loaded_schema.table_by(name: 'users')
+            expect(users_table.foreign_keys.length).to eq(1)
+            fk = users_table.foreign_keys.first
+            expect(fk.from_table).to eq('users')
+            expect(fk.to_table).to eq('roles')
+            expect(fk.on_delete).to eq(:restrict)
+            expect(fk.column).to eq('role_id')
+            expect(fk.primary_key).to eq('id')
+            expect(fk.name).to eq('users_roles_fk')
+          end
+        end
       end
 
       context 'when the current directory is Rails.root' do

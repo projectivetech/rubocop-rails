@@ -5,7 +5,7 @@ module RuboCop
     module SchemaLoader
       # Represent db/schema.rb
       class Schema
-        attr_reader :tables, :add_indices
+        attr_reader :tables, :add_indices, :foreign_keys
 
         def initialize(ast)
           @tables = []
@@ -41,6 +41,11 @@ module RuboCop
           each_add_index(ast) do |add_index_def|
             @add_indices << AddIndex.new(add_index_def)
           end
+
+          each_foreign_key(ast) do |add_foreign_key_def|
+            fk = ForeignKey.new(add_foreign_key_def)
+            table_by(name: fk.from_table).foreign_keys << fk
+          end
         end
 
         def each_table(ast)
@@ -53,6 +58,15 @@ module RuboCop
             end
           else
             yield ast.body
+          end
+        end
+
+        def each_foreign_key(ast)
+          ast.body.children.each do |node|
+            next unless node.respond_to?(:send_type?)
+            next if !node&.send_type? || !node.method?(:add_foreign_key)
+
+            yield(node)
           end
         end
 
@@ -69,11 +83,13 @@ module RuboCop
       # Represent a table
       class Table
         attr_reader :name, :columns, :indices
+        attr_accessor :foreign_keys
 
         def initialize(node)
           @name = node.send_node.first_argument.value
           @columns = build_columns(node)
           @indices = build_indices(node)
+          @foreign_keys = []
         end
 
         def with_column?(name:)
@@ -167,6 +183,35 @@ module RuboCop
               @name = v.value
             when :unique
               @unique = true
+            end
+          end
+        end
+      end
+
+      # Represents an foreign key
+      class ForeignKey
+        attr_reader :from_table, :to_table, :on_delete, :name, :column, :primary_key
+
+        def initialize(node)
+          @from_table = node.arguments[0].str_content
+          @to_table = node.arguments[1].str_content
+          analyze_keywords!(node)
+        end
+
+        def analyze_keywords!(node)
+          pairs = node.arguments.last
+          return unless pairs.hash_type?
+
+          pairs.each_pair do |k, v|
+            case k.value
+            when :name
+              @name = v.value
+            when :on_delete
+              @on_delete = v.value
+            when :column
+              @column = v.value
+            when :primary_key
+              @primary_key = v.value
             end
           end
         end
